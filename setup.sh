@@ -4,6 +4,16 @@
 
 #Defining variables
 nginx_ver=nginx-1.14.1
+#Text color variables
+txtred=$(tput setaf 1)    # Red
+txtgreen=$(tput setaf 2)  # Green
+txtyellow=$(tput setaf 3) # Yellow
+txtreset=$(tput sgr0)     # Text reset
+
+###Disable SELinux Temporarily
+setenforce 0
+###Disable SELinux Permanently after restart OS
+sed -i 's/^SELINUX=enforcing/SELINUX=disabled/g' /etc/selinux/config
 
 #Declare choice variable and assign value is 4
 choice=4
@@ -16,17 +26,17 @@ choice=4
 while [ $choice -eq 4 ]; do
 read choice
 if [ $choice == 1 ]; then
-        echo "Preparing to install stack with Enginx MongoDB3 PHP7"
-	sleep 3
+        echo "${txtyellow}***Preparing to install stack with Enginx MongoDB3 PHP7***${txtreset}"
+		sleep 3
 else
         if [ $choice -eq 2 ]; then
-                echo "Preparing to install stack with Enginx MariaDB PHP7"
-		sleep 3
+		    echo "${txtyellow}***Preparing to install stack with Enginx MariaDB PHP7***${txtreset}"
+			sleep 3
         else
 		if [ $choice -eq 3 ]; then
-			echo "You don't install DB"
+			echo "${txtyellow}***You don't install DB***${txtreset}"
 		else
-		        echo -n "Please choice one value [1 or 2 or 3]"
+		        echo -n "${txtyellow}***Please choice one value [1 or 2 or 3]***${txtreset}"
                 	choice=4 #repeat if don't choice 1|2|3
 		fi
         fi
@@ -34,15 +44,15 @@ fi
 done
 
 ####INSTALLING NGINX
-echo "Check OS and install essential package to compile nginx"
+echo "${txtyellow}***Check OS and install essential package to compile nginx***${txtreset}"
 sleep 2
-sudo yum -y install make gcc gcc-c++ pcre-devel zlib-devel openssl-devel
+sudo yum -y install make gcc gcc-c++ pcre-devel zlib-devel openssl-devel curl wget
 
 echo "Create nginx user"
 useradd -d /dev/null -c "nginx user" -s /sbin/nologin nginx
 
 # Download & unpack latest stable nginx & nginx-rtmp version
-echo "Download and unpack latest stable nginx"
+echo "${txtyellow}***Download and unpack latest stable nginx***${txtreset}"
 sleep 3
 cd /opt
 wget http://nginx.org/download/${nginx_ver}.tar.gz
@@ -93,12 +103,12 @@ sleep 2
 yum -y install epel-release
 rpm -Uvh https://mirror.webtatic.com/yum/el7/webtatic-release.rpm
 
-echo "Installing PHP7"
+echo "${txtyellow}***Installing PHP7***${txtreset}"
 sleep 3
 yum install -y php72w php72w-common php72w-gd php72w-phar \
 php72w-xml php72w-cli php72w-mbstring php72w-tokenizer \
 php72w-openssl php72w-pdo php72w-devel php72w-opcache \
-php72w-pear php72w-fpm php72w-pecl-mongodb php71w-fpm
+php72w-pear php72w-fpm php72w-pecl-mongodb php72w-fpm
 
 echo "Starting php-fpm"
 systemctl start php-fpm
@@ -170,9 +180,9 @@ else
 fi
 
 ########SETUP NGINX###########
-###Create many virtualhosts, same server_name as apache
-mkdir /etc/nginx/sites-available/
-mkdir /etc/nginx/sites-enabled/
+###Create many virtualhosts
+[ ! -d /etc/nginx/sites-available/ ] && mkdir /etc/nginx/sites-available/
+[ ! -d /etc/nginx/sites-enabled/ ] &&mkdir /etc/nginx/sites-enabled/
 
 cat >/etc/nginx/nginx.conf<<EOF
 user nginx;
@@ -224,21 +234,33 @@ location ~ /\.(?!well-known) {
 
 # assets, media
 location ~* \.(?:css(\.map)?|js(\.map)?|jpe?g|png|gif|ico|cur|heic|webp|tiff?|mp3|m4a|aac|ogg|midi?|wav|mp4|mov|webm|mpe?g|avi|ogv|flv|wmv)$ {
-	expires 7d;
+	expires 30d;
 	access_log off;
 }
 
 # svg, fonts
 location ~* \.(?:svgz?|ttf|ttc|otf|eot|woff2?)$ {
 	add_header Access-Control-Allow-Origin "*";
-	expires 7d;
+	expires 30d;
 	access_log off;
 }
 
-# gzip
+#enable gzip compression to reduce the data that sent over network
 gzip on;
 gzip_vary on;
 gzip_proxied any;
-gzip_comp_level 6;
-gzip_types text/plain text/css text/xml application/json application/javascript application/xml+rss application/atom+xml image/svg+xml;
+gzip_comp_level 6; #choose level 2-3 to redue CPU load
+gzip_types
+    text/plain
+    text/css
+    text/js
+    text/xml
+    text/javascript
+    application/javascript
+    application/x-javascript
+    application/json
+    application/xml
+    application/rss+xml
+	application/atom+xml
+    image/svg+xml;
 EOF
