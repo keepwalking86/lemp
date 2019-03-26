@@ -15,34 +15,6 @@ setenforce 0
 ###Disable SELinux Permanently after restart OS
 sed -i 's/^SELINUX=enforcing/SELINUX=disabled/g' /etc/selinux/config
 
-#Declare choice variable and assign value is 4
-choice=4
-#print stdout
- echo "1. MongoDB-3x"
- echo "2. MariaDB"
- echo "3. Don't install DB"
- echo -n "Please choice one value [1 or 2 or 3]: "
-#loop while
-while [ $choice -eq 4 ]; do
-read choice
-if [ $choice == 1 ]; then
-        echo "${txtyellow}***Preparing to install stack with Enginx MongoDB3 PHP7***${txtreset}"
-		sleep 3
-else
-        if [ $choice -eq 2 ]; then
-		    echo "${txtyellow}***Preparing to install stack with Enginx MariaDB PHP7***${txtreset}"
-			sleep 3
-        else
-		if [ $choice -eq 3 ]; then
-			echo "${txtyellow}***You don't install DB***${txtreset}"
-		else
-		        echo -n "${txtyellow}***Please choice one value [1 or 2 or 3]***${txtreset}"
-                	choice=4 #repeat if don't choice 1|2|3
-		fi
-        fi
-fi
-done
-
 ####INSTALLING NGINX
 echo "${txtyellow}***Check OS and install essential package to compile nginx***${txtreset}"
 sleep 2
@@ -79,16 +51,20 @@ make install
 #Create nginx.service file
 cat >/lib/systemd/system/nginx.service<<EOF
 [Unit]
-Description=nginx - high performance web server
+Description=nginx - The nginx HTTP and reverse proxy server
 Documentation=http://nginx.org/en/docs/
 After=network-online.target remote-fs.target nss-lookup.target
 Wants=network-online.target
 [Service]
 Type=forking
-ExecStartPre=/usr/sbin/nginx -t -c /etc/nginx/nginx.conf
-ExecStart=/usr/sbin/nginx -c /etc/nginx/nginx.conf
-ExecReload=/bin/kill -s HUP $MAINPID
-ExecStop=/bin/kill -s QUIT $MAINPID
+ExecStartPre=/usr/bin/rm -f /var/run/nginx.pid
+ExecStartPre=/usr/sbin/nginx -t
+ExecStart=/usr/sbin/nginx
+ExecReload=/bin/kill -s HUP \$MAINPID
+KillSignal=SIGQUIT
+TimeoutStopSec=5
+KillMode=process
+PrivateTmp=true
 [Install]
 WantedBy=multi-user.target
 EOF
@@ -97,8 +73,97 @@ EOF
 systemctl enable nginx.service
 systemctl start nginx.service
 
+########SETUP NGINX###########
+###Create many virtualhosts
+[ ! -d /etc/nginx/sites-available ] && mkdir /etc/nginx/sites-available
+[ ! -d /etc/nginx/sites-enabled ] && mkdir /etc/nginx/sites-enabled
+[ ! -d /var/log/nginx ] && mkdir /var/log/nginx
+
+#Nginx configuration file
+cat >/etc/nginx/nginx.conf<<EOF
+user nginx;
+pid /var/run/nginx.pid;
+worker_processes auto;
+worker_rlimit_nofile 65535;
+
+events {
+	multi_accept on;
+	worker_connections 65535;
+}
+
+http {
+	charset utf-8;
+	sendfile on;
+	tcp_nopush on;
+	tcp_nodelay on;
+	server_tokens off;
+	log_not_found off;
+	types_hash_max_size 2048;
+	client_max_body_size 16M;
+
+	# MIME
+	include mime.types;
+	default_type application/octet-stream;
+
+	# logging
+	access_log /var/log/nginx/access.log;
+	error_log /var/log/nginx/error.log warn;
+
+	# load configs
+	include /etc/nginx/conf.d/*.conf;
+	include /etc/nginx/sites-enabled/*;
+}
+EOF
+
+#Nginx general settings about security, cached, compress
+cat >/etc/nginx/general.conf<<EOF
+# security headers
+add_header X-Frame-Options "SAMEORIGIN" always;
+add_header X-XSS-Protection "1; mode=block" always;
+add_header X-Content-Type-Options "nosniff" always;
+add_header Referrer-Policy "same-origin" always;
+add_header Content-Security-Policy "default-src * data: 'unsafe-eval' 'unsafe-inline'" always;
+
+# . files
+location ~ /\.(?!well-known) {
+	deny all;
+}
+
+# assets, media
+location ~* \.(?:css(\.map)?|js(\.map)?|jpe?g|png|gif|ico|cur|heic|webp|tiff?|mp3|m4a|aac|ogg|midi?|wav|mp4|mov|webm|mpe?g|avi|ogv|flv|wmv)$ {
+	expires 30d;
+	access_log off;
+}
+
+# svg, fonts
+location ~* \.(?:svgz?|ttf|ttc|otf|eot|woff2?)$ {
+	add_header Access-Control-Allow-Origin "*";
+	expires 30d;
+	access_log off;
+}
+
+#enable gzip compression to reduce the data that sent over network
+gzip on;
+gzip_vary on;
+gzip_proxied any;
+gzip_comp_level 6; #choose level 2-3 to redue CPU load
+gzip_types
+    text/plain
+    text/css
+    text/js
+    text/xml
+    text/javascript
+    application/javascript
+    application/x-javascript
+    application/json
+    application/xml
+    application/rss+xml
+    application/atom+xml
+    image/svg+xml;
+EOF
+
 ###########INSTALLING PHP7######################
-echo "Installing repo epel, webstatic"
+echo "${txtyellow}***Installing repo epel, webstatic***${txtreset}"
 sleep 2
 yum -y install epel-release
 rpm -Uvh https://mirror.webtatic.com/yum/el7/webtatic-release.rpm
@@ -114,7 +179,7 @@ echo "Starting php-fpm"
 systemctl start php-fpm
 systemctl enable php-fpm
 
-echo "Installing PHP Composer"
+echo "${txtyellow}***Installing PHP Composer***${txtreset}"
 curl -sS https://getcomposer.org/installer |php -- --install-dir=/usr/bin --filename=composer
 
 
@@ -165,102 +230,33 @@ mariadb () {
 }
 
 ###########INSTALLING DATABASE SERVER#################
-if [ $choice -eq 1 ]; then
-	echo "Installing MongoDB-3x ..."
-	sleep 3
-        mongodb
-else
-	if [ $choice -eq 2 ]; then
-		echo "Installing MariaDB ..."
+#Declare choice variable and assign value is 4
+echo "${txtyellow}***Installing DB***${txtreset}"
+choice=4
+#print stdout
+ echo "1. MongoDB-3x"
+ echo "2. MariaDB"
+ echo "3. Don't install DB"
+ echo -n "Please choice one value [1 or 2 or 3]: "
+#loop while
+while [ $choice -eq 4 ]; do
+read choice
+if [ $choice == 1 ]; then
+        echo "${txtyellow}***Preparing to install stack with Enginx MongoDB3 PHP7***${txtreset}"
 		sleep 3
-        	mariadb
-	else
-		echo "Don't install DB"
-	fi
+		mongodb
+else
+        if [ $choice -eq 2 ]; then
+		    echo "${txtyellow}***Preparing to install stack with Enginx MariaDB PHP7***${txtreset}"
+			sleep 3
+			mariadb
+        else
+		if [ $choice -eq 3 ]; then
+			echo "${txtyellow}***You don't install DB***${txtreset}"
+		else
+		        echo -n "${txtyellow}***Please choice one value [1 or 2 or 3]***${txtreset}"
+                	choice=4 #repeat if don't choice 1|2|3
+		fi
+        fi
 fi
-
-########SETUP NGINX###########
-###Create many virtualhosts
-[ ! -d /etc/nginx/sites-available/ ] && mkdir /etc/nginx/sites-available/
-[ ! -d /etc/nginx/sites-enabled/ ] &&mkdir /etc/nginx/sites-enabled/
-
-cat >/etc/nginx/nginx.conf<<EOF
-user nginx;
-pid /var/run/nginx.pid;
-worker_processes auto;
-worker_rlimit_nofile 65535;
-
-events {
-	multi_accept on;
-	worker_connections 65535;
-}
-
-http {
-	charset utf-8;
-	sendfile on;
-	tcp_nopush on;
-	tcp_nodelay on;
-	server_tokens off;
-	log_not_found off;
-	types_hash_max_size 2048;
-	client_max_body_size 16M;
-
-	# MIME
-	include mime.types;
-	default_type application/octet-stream;
-
-	# logging
-	access_log /var/log/nginx/access.log;
-	error_log /var/log/nginx/error.log warn;
-
-	# load configs
-	include /etc/nginx/conf.d/*.conf;
-	include /etc/nginx/sites-enabled/*;
-}
-EOF
-
-cat >/etc/nginx/general.conf<<EOF
-# security headers
-add_header X-Frame-Options "SAMEORIGIN" always;
-add_header X-XSS-Protection "1; mode=block" always;
-add_header X-Content-Type-Options "nosniff" always;
-add_header Referrer-Policy "same-origin" always;
-add_header Content-Security-Policy "default-src * data: 'unsafe-eval' 'unsafe-inline'" always;
-
-# . files
-location ~ /\.(?!well-known) {
-	deny all;
-}
-
-# assets, media
-location ~* \.(?:css(\.map)?|js(\.map)?|jpe?g|png|gif|ico|cur|heic|webp|tiff?|mp3|m4a|aac|ogg|midi?|wav|mp4|mov|webm|mpe?g|avi|ogv|flv|wmv)$ {
-	expires 30d;
-	access_log off;
-}
-
-# svg, fonts
-location ~* \.(?:svgz?|ttf|ttc|otf|eot|woff2?)$ {
-	add_header Access-Control-Allow-Origin "*";
-	expires 30d;
-	access_log off;
-}
-
-#enable gzip compression to reduce the data that sent over network
-gzip on;
-gzip_vary on;
-gzip_proxied any;
-gzip_comp_level 6; #choose level 2-3 to redue CPU load
-gzip_types
-    text/plain
-    text/css
-    text/js
-    text/xml
-    text/javascript
-    application/javascript
-    application/x-javascript
-    application/json
-    application/xml
-    application/rss+xml
-	application/atom+xml
-    image/svg+xml;
-EOF
+done
