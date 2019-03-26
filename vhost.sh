@@ -44,17 +44,24 @@ server {
 		try_files \$fastcgi_script_name =404;
 		
 		# default fastcgi_params
-		include /etc/nginx/fastcgi_params;
+		include /etc/nginx/fastcgi_params;	
 		
 		# fastcgi settings
+		fastcgi_param SCRIPT_FILENAME \$document_root\$fastcgi_script_name;
 		fastcgi_pass			127.0.0.1:9000;
 		fastcgi_index			index.php;
 		fastcgi_buffers			8 16k;
 		fastcgi_buffer_size		32k;
-
 	}
+	include /etc/nginx/general.conf;
 }
 EOF
 
 # Create symbolic link
 ln -s /etc/nginx/sites-available/$DOMAIN.conf /etc/nginx/sites-enabled
+
+# Restart nginx
+systemctl restart nginx.service
+
+#Access web
+echo -e "Access to your website: http://$DOMAIN"
