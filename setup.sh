@@ -4,6 +4,9 @@
 
 #Defining variables
 nginx_ver=nginx-1.14.1
+mongodb_version=4.0
+mariadb_version=10.4
+
 #Text color variables
 txtred=$(tput setaf 1)    # Red
 txtgreen=$(tput setaf 2)  # Green
@@ -170,10 +173,8 @@ rpm -Uvh https://mirror.webtatic.com/yum/el7/webtatic-release.rpm
 
 echo "${txtyellow}***Installing PHP7***${txtreset}"
 sleep 3
-yum install -y php72w php72w-common php72w-gd php72w-phar \
-php72w-xml php72w-cli php72w-mbstring php72w-tokenizer \
-php72w-openssl php72w-pdo php72w-devel php72w-opcache \
-php72w-pear php72w-fpm php72w-pecl-mongodb php72w-fpm
+yum install -y php72w php72w-common php72w-gd php72w-phar php72w-xml php72w-cli php72w-mbstring php72w-tokenizer \
+php72w-openssl php72w-pdo php72w-devel php72w-opcache php72w-fpm
 
 echo "Starting php-fpm"
 systemctl start php-fpm
@@ -187,36 +188,14 @@ curl -sS https://getcomposer.org/installer |php -- --install-dir=/usr/bin --file
 mongodb () {
 #Create mongodb repo
 cat >/etc/yum.repos.d/mongodb.repo<<EOF
-[mongodb-org-3.6]
+[mongodb-org-${mongodb_version}]
 name=MongoDB Repository
-baseurl=https://repo.mongodb.org/yum/redhat/\$releasever/mongodb-org/3.6/x86_64/
+baseurl=https://repo.mongodb.org/yum/redhat/\$releasever/mongodb-org/${mongodb_version}/x86_64/
 gpgcheck=1
 enabled=1
-gpgkey=https://www.mongodb.org/static/pgp/server-3.6.asc
+gpgkey=https://www.mongodb.org/static/pgp/server-${mongodb_version}.asc
 EOF
     yum install mongodb-org -y
-    #Create DB storage
-    mkdir -p /data/db && chown -R mongod:mongod /data
-#Edit mongodb configuration file
-cat >/etc/mongod.conf<<EOF
-systemLog:
-  destination: file
-  logAppend: true
-  path: /var/log/mongodb/mongod.log
-# Where and how to store data.
-storage:
-  dbPath: /data/db
-  journal:
-    enabled: true
-# how the process runs
-processManagement:
-  fork: true  # fork and run in background
-  pidFilePath: /var/run/mongodb/mongod.pid  # location of pidfile
-# network interfaces
-net:
-  port: 27017
-  bindIp: 127.0.0.1  # Listen to local
-EOF
     #Start MongoDB
     systemctl start mongod
     systemctl enable mongod
@@ -224,7 +203,10 @@ EOF
 
 ###############FUNCTION MARIADB#####################
 mariadb () {
-    yum -y install mariadb-server mariadb
+    wget https://downloads.mariadb.com/MariaDB/mariadb_repo_setup
+    chmod +x mariadb_repo_setup
+    ./mariadb_repo_setup --mariadb-server-version="mariadb-${mariadb_version}"
+    yum -y install MariaDB-server
     systemctl start mariadb
     systemctl enable mariadb
 }
@@ -234,7 +216,7 @@ mariadb () {
 echo "${txtyellow}***Installing DB***${txtreset}"
 choice=4
 #print stdout
- echo "1. MongoDB-3x"
+ echo "1. MongoDB"
  echo "2. MariaDB"
  echo "3. Don't install DB"
  echo -n "Please choice one value [1 or 2 or 3]: "
@@ -242,21 +224,23 @@ choice=4
 while [ $choice -eq 4 ]; do
 read choice
 if [ $choice == 1 ]; then
-        echo "${txtyellow}***Preparing to install stack with Enginx MongoDB3 PHP7***${txtreset}"
+    echo "${txtyellow}***Preparing to install MongoDB3***${txtreset}"
 		sleep 3
 		mongodb
+    yum install php72w-pear php72w-pecl-mongodb -y
 else
-        if [ $choice -eq 2 ]; then
-		    echo "${txtyellow}***Preparing to install stack with Enginx MariaDB PHP7***${txtreset}"
+  if [ $choice -eq 2 ]; then
+      echo "${txtyellow}***Preparing to install MariaDB***${txtreset}"
 			sleep 3
 			mariadb
-        else
-		if [ $choice -eq 3 ]; then
-			echo "${txtyellow}***You don't install DB***${txtreset}"
-		else
+      yum install php72w-mysql -y
+  else
+			if [ $choice -eq 3 ]; then
+				echo "${txtyellow}***You don't install DB***${txtreset}"
+			else
 		        echo -n "${txtyellow}***Please choice one value [1 or 2 or 3]***${txtreset}"
-                	choice=4 #repeat if don't choice 1|2|3
-		fi
-        fi
+                choice=4 #repeat if don't choice 1|2|3
+			fi
+  fi
 fi
 done
